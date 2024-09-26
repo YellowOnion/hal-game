@@ -17,21 +17,38 @@ import Foreign.Marshal.Array
 
 import Shaders
 
-data Scene = Scene { win :: SDL.Window,
-                shaderProgram :: GL.Program }
+data Scene = Scene
+  { win :: SDL.Window
+  , shaderProgram :: GL.Program
+  , triVAO :: GL.VertexArrayObject
+  , triVBO :: GL.BufferObject
+  } deriving (Show, Eq)
 
 mkScene :: SDL.Window -> IO Scene
 mkScene win = do
+  -- Shader setup
   p <- GL.createProgram
   GL.attachShader p =<< vertexShader
   GL.attachShader p =<< fragmentShader
   GL.linkProgram p
   status <- get $ GL.linkStatus p
   log_ <- get $ GL.programInfoLog p
+
+  -- vertex buffer object setup
+  triVBO <- GL.genObjectName
+  triVAO <- GL.genObjectName
+  GL.bindVertexArrayObject $= Just triVAO
+  GL.bindBuffer GL.ArrayBuffer $= Just triVBO
+  t <- triangle
+  GL.bufferData GL.ArrayBuffer $= t
+
+  let loc = GL.AttribLocation 0
+  GL.vertexAttribPointer loc $= (GL.ToFloat, GL.VertexArrayDescriptor 3 GL.Float 0 nullPtr )
+  GL.vertexAttribArray loc $= GL.Enabled
+
   if status
     then do
-    GL.currentProgram $= Just p
-    return $ Scene win p
+    return $ Scene win p triVAO triVBO
     else error log_
 
 
@@ -71,13 +88,13 @@ appLoop scene = do
 
 triangle = do
   ptr <- newArray pt
-  let size = fromIntegral $ sizeOf (0.0 :: Float) * length pt
+  let size = fromIntegral $ sizeOf (head pt) * length pt
   return (size, ptr, GL.StaticDraw)
   where
-    pt :: [Float]
-    pt = [ (-0.5), (-0.5), 0.0,
-             0.5 , (-0.5), 0.0,
-             0.0 ,   0.5 , 0.0 ]
+    pt :: [GL.Vertex3 Float]
+    pt = [ GL.Vertex3 (-0.5) (-0.5) 0.0
+         , GL.Vertex3   0.5 (-0.5)  0.0
+         , GL.Vertex3   0.0   0.5   0.0 ]
 
 
 vertexShader :: IO GL.Shader
@@ -88,14 +105,11 @@ fragmentShader :: IO GL.Shader
 fragmentShader = mkShader GL.FragmentShader (ShaderFile "data/frag.glsl")
 
 drawAll Scene{..} = do
-  GL.clearColor $= GL.Color4 1.0 1.0 1.0 1.0
+  GL.clearColor $= GL.Color4 0 0 0 1.0
   GL.clear [GL.ColorBuffer]
 
-  -- useProgram
-  -- bindVBO
-  -- drawArrays
+  GL.currentProgram $= Just shaderProgram
+  GL.bindVertexArrayObject $= Just triVAO
+  GL.drawArrays GL.Triangles 0 3
 
-  let buf = GL.bindBuffer GL.ArrayBuffer
-  t <- triangle
-  GL.bufferData GL.ArrayBuffer $= t
   SDL.glSwapWindow win

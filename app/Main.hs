@@ -10,6 +10,12 @@ import qualified SDL
 import qualified Graphics.Rendering.OpenGL as GL
 import           Graphics.Rendering.OpenGL ( HasSetter(($=)), HasGetter(get) )
 
+import qualified Linear as L
+import qualified Linear.V4 as L (point)
+import           Linear (V3(..), (!*), (*!))
+
+import Debug.Trace
+
 import Foreign.Ptr
 import Foreign.Storable
 import Foreign.Marshal.Alloc
@@ -17,12 +23,36 @@ import Foreign.Marshal.Array
 
 import Shaders
 
-data Scene = Scene
-  { win :: SDL.Window
-  , shaderProgram :: GL.Program
-  , triVAO :: GL.VertexArrayObject
-  , triVBO :: GL.BufferObject
+data Camera = Camera
+  { camProjLoc :: !GL.UniformLocation
+  , camViewLoc :: !GL.UniformLocation
   } deriving (Show, Eq)
+
+data Scene = Scene
+  { win :: !SDL.Window
+  , shaderProgram :: !GL.Program
+  , triVAO :: !GL.VertexArrayObject
+  , triVBO :: !GL.BufferObject
+  , camera :: !Camera
+  } deriving (Show, Eq)
+
+viewMat :: Float -> L.M44 GL.GLfloat
+viewMat t = L.lookAt pos cen up
+  where
+    r   = 10
+    x   = cos t * r
+    z   = sin t * r
+    pos = V3 x 0.0 z
+    cen = V3 0.0 0.0 0.0
+    up  = V3 0.0 1.0 0.0
+
+m44ToGLmatrix :: GL.MatrixComponent a => L.M44 a -> IO (GL.GLmatrix a)
+m44ToGLmatrix m = GL.withNewMatrix GL.ColumnMajor $ \p->poke (castPtr p) m
+{-# INLINABLE m44ToGLmatrix #-}
+
+m44ToGLmatrixRow :: GL.MatrixComponent a => L.M44 a -> IO (GL.GLmatrix a)
+m44ToGLmatrixRow m = GL.withNewMatrix GL.RowMajor $ \p->poke (castPtr p) m
+{-# INLINABLE m44ToGLmatrixRow #-}
 
 mkScene :: SDL.Window -> IO Scene
 mkScene win = do
@@ -39,16 +69,32 @@ mkScene win = do
   triVAO <- GL.genObjectName
   GL.bindVertexArrayObject $= Just triVAO
   GL.bindBuffer GL.ArrayBuffer $= Just triVBO
-  t <- triangle
-  GL.bufferData GL.ArrayBuffer $= t
+  tri <- triangle
+  GL.bufferData GL.ArrayBuffer $= tri
 
   let loc = GL.AttribLocation 0
   GL.vertexAttribPointer loc $= (GL.ToFloat, GL.VertexArrayDescriptor 3 GL.Float 0 nullPtr )
   GL.vertexAttribArray loc $= GL.Enabled
 
+  projLoc <- get $ GL.uniformLocation p "projection"
+
+  (L.V2 x y) :: L.V2 Float <- fmap (fmap fromIntegral) <$> get $ SDL.windowSize win
+  let perspective = L.perspective (pi / 2) (x / y) 0.1 100
+  m44 <- m44ToGLmatrix perspective
+  GL.uniform projLoc $= m44
+
+  t <- fmap ((/1000) . fromIntegral) SDL.ticks
+
+  viewLoc <- get $ GL.uniformLocation p "view"
+  let mat = viewMat t
+  m44 <- m44ToGLmatrix mat
+  GL.uniform viewLoc $= m44
+
+  print $ fmap ((*! (mat * perspective)) . L.point) pt
+
   if status
     then do
-    return $ Scene win p triVAO triVBO
+    return $! Scene win p triVAO triVBO (Camera projLoc viewLoc)
     else error log_
 
 
@@ -82,19 +128,21 @@ appLoop scene = do
             SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == SDL.KeycodeQ
           _ -> False
       qPressed = any eventIsQPress events
-  drawAll scene
-  unless qPressed (appLoop scene)
+  x <- drawAll scene
+  x `seq` unless qPressed (appLoop scene)
 
 
+triangle :: IO (GL.GLsizeiptr, Ptr (L.V3 Float), GL.BufferUsage)
 triangle = do
   ptr <- newArray pt
   let size = fromIntegral $ sizeOf (head pt) * length pt
   return (size, ptr, GL.StaticDraw)
-  where
-    pt :: [GL.Vertex3 Float]
-    pt = [ GL.Vertex3 (-0.5) (-0.5) 0.0
-         , GL.Vertex3   0.5 (-0.5)  0.0
-         , GL.Vertex3   0.0   0.5   0.0 ]
+
+d30 = 0.5/(pi / 3)
+pt :: [ L.V3 Float ]
+pt =  [ L.V3 (-d30) (-0.5) (0.0)
+      , L.V3   d30  (-0.5) (0.0)
+      , L.V3   0.0    0.5  (0.0) ]
 
 
 vertexShader :: IO GL.Shader
@@ -104,9 +152,17 @@ vertexShader = mkShader GL.VertexShader (ShaderFile "data/vertex.glsl")
 fragmentShader :: IO GL.Shader
 fragmentShader = mkShader GL.FragmentShader (ShaderFile "data/frag.glsl")
 
+drawAll :: Scene -> IO ()
 drawAll Scene{..} = do
-  GL.clearColor $= GL.Color4 0 0 0 1.0
-  GL.clear [GL.ColorBuffer]
+  t <- fmap ((/1000) . fromIntegral) SDL.ticks
+  GL.clearColor $= GL.Color4 (0.5 * sin             t  + 0.5)
+                             (0.5 * sin (pi * 2/3 + t) + 0.5)
+                             (0.5 * sin (pi * 4/3 + t) + 0.5)
+                             1.0
+  GL.clear [ GL.ColorBuffer ]
+
+  m44 <- m44ToGLmatrix $ viewMat t
+  GL.uniform (camViewLoc camera) $= m44
 
   GL.currentProgram $= Just shaderProgram
   GL.bindVertexArrayObject $= Just triVAO

@@ -56,6 +56,7 @@ common libs
                     , filepath
                     , OpenGL
                     , sdl2
+                    , linear
     default-language: GHC2021
 
 

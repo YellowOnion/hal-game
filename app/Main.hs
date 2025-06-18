@@ -39,10 +39,11 @@ data Scene = Scene
 viewMat :: Float -> L.M44 GL.GLfloat
 viewMat t = L.lookAt pos cen up
   where
-    r   = 10
+    r   = 1
     x   = cos t * r
     z   = sin t * r
-    pos = V3 x 0.0 z
+    y   = sin (2*t) * 1/pi
+    pos = V3 x y z
     cen = V3 0.0 0.0 0.0
     up  = V3 0.0 1.0 0.0
 
@@ -53,6 +54,26 @@ m44ToGLmatrix m = GL.withNewMatrix GL.ColumnMajor $ \p->poke (castPtr p) m
 m44ToGLmatrixRow :: GL.MatrixComponent a => L.M44 a -> IO (GL.GLmatrix a)
 m44ToGLmatrixRow m = GL.withNewMatrix GL.RowMajor $ \p->poke (castPtr p) m
 {-# INLINABLE m44ToGLmatrixRow #-}
+
+mat4FloatUniform :: GL.Program -> String -> L.M44 Float -> IO GL.UniformLocation
+mat4FloatUniform p str val = do
+  loc <- get $ GL.uniformLocation p str
+  m4 <- m44ToGLmatrixRow val
+  GL.uniform loc $= m4
+  return loc
+
+setUniforms :: GL.Program -> SDL.Window -> Float -> IO (GL.UniformLocation, GL.UniformLocation)
+setUniforms p win t = do
+  (L.V2 x y) :: L.V2 Float <- fmap (fmap fromIntegral) <$> get $ SDL.windowSize win
+  let perspective = L.perspective (pi / 2) -- 90 degrees FOV
+                                   (x / y) -- Aspect Ratio
+                                      0.1  -- near plane
+                                      100  -- far plane
+      view         = viewMat t
+
+  projLoc <- mat4FloatUniform p "projection" perspective
+  viewLoc <- mat4FloatUniform p "view" view
+  return (projLoc, viewLoc)
 
 mkScene :: SDL.Window -> IO Scene
 mkScene win = do
@@ -73,24 +94,13 @@ mkScene win = do
   GL.bufferData GL.ArrayBuffer $= tri
 
   let loc = GL.AttribLocation 0
-  GL.vertexAttribPointer loc $= (GL.ToFloat, GL.VertexArrayDescriptor 3 GL.Float 0 nullPtr )
+  GL.vertexAttribPointer loc
+    $= (GL.ToFloat, GL.VertexArrayDescriptor 3 GL.Float 0 nullPtr )
   GL.vertexAttribArray loc $= GL.Enabled
-
-  projLoc <- get $ GL.uniformLocation p "projection"
-
-  (L.V2 x y) :: L.V2 Float <- fmap (fmap fromIntegral) <$> get $ SDL.windowSize win
-  let perspective = L.perspective (pi / 2) (x / y) 0.1 100
-  m44 <- m44ToGLmatrix perspective
-  GL.uniform projLoc $= m44
 
   t <- fmap ((/1000) . fromIntegral) SDL.ticks
 
-  viewLoc <- get $ GL.uniformLocation p "view"
-  let mat = viewMat t
-  m44 <- m44ToGLmatrix mat
-  GL.uniform viewLoc $= m44
-
-  print $ fmap ((*! (mat * perspective)) . L.point) pt
+  (projLoc, viewLoc) <- setUniforms p win t
 
   if status
     then do
@@ -103,10 +113,12 @@ main = do
   putStrLn "Welcome!"
   SDL.initializeAll
   win <- SDL.createWindow "hal-game"
-    SDL.defaultWindow { SDL.windowGraphicsContext =
-                        SDL.OpenGLContext SDL.defaultOpenGL
-                        { SDL.glProfile = SDL.Core SDL.Normal 3 3 }
-                      }
+    SDL.defaultWindow
+    { SDL.windowInitialSize = L.V2 1600 900
+    , SDL.windowGraphicsContext =
+        SDL.OpenGLContext SDL.defaultOpenGL
+        { SDL.glProfile = SDL.Core SDL.Normal 3 3 }
+    }
   ctx <- createContext win
   scene <- mkScene win
   appLoop scene
@@ -155,16 +167,17 @@ fragmentShader = mkShader GL.FragmentShader (ShaderFile "data/frag.glsl")
 drawAll :: Scene -> IO ()
 drawAll Scene{..} = do
   t <- fmap ((/1000) . fromIntegral) SDL.ticks
-  GL.clearColor $= GL.Color4 (0.5 * sin             t  + 0.5)
-                             (0.5 * sin (pi * 2/3 + t) + 0.5)
-                             (0.5 * sin (pi * 4/3 + t) + 0.5)
-                             1.0
+  GL.clearColor $= let x = 0.1 in
+    GL.Color4 (x * sin             t  + x)
+              (x * sin (pi * 2/3 + t) + x)
+              (x * sin (pi * 4/3 + t) + x)
+    1.0
   GL.clear [ GL.ColorBuffer ]
 
-  m44 <- m44ToGLmatrix $ viewMat t
-  GL.uniform (camViewLoc camera) $= m44
-
   GL.currentProgram $= Just shaderProgram
+
+  _ <- setUniforms shaderProgram win t
+
   GL.bindVertexArrayObject $= Just triVAO
   GL.drawArrays GL.Triangles 0 3
 

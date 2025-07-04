@@ -2,7 +2,7 @@
   description = "hal-game";
 
   inputs = {
-    nixpkgs.url = "nixpkgs";
+    nixpkgs.url = "nixpkgs/d3d2d80a2191a73d1e86456a751b83aa13085d7";
     typed-systems = {
       url = "github:YellowOnion/nix-typed-systems";
       flake = false;
@@ -24,11 +24,12 @@
           inherit system pkgs;
           haskellPkgs = pkgs.haskellPackages.override {
             overrides = _: super: {
-              #GPipe-Core = hsLib.markUnbroken (hsLib.overrideSrc {
-              #  src = ./GPipe-Core/GPipe-Core;
-              # } super.GPipe-Core);
+                gltf-codec = hsLib.doJailbreak
+                  (hsLib.dontCheck
+                    (hsLib.markUnbroken (super.gltf-codec )));
+            };
           };
-          };}) systems;
+        }) systems;
     in {
       packages = eachSystem ({ pkgs, haskellPkgs, ... }:
         let
@@ -36,6 +37,11 @@
         in {
           ${pkgName} = pkg;
           default = pkg;
+          wrapper = pkgs.writeShellScriptBin "wrapper.sh" ''
+            export SDL_VIDEODRIVER=x11
+            export LD_LIBRARY_PATH="$(patchelf --print-rpath ${pkgs.sdl2-compat}/lib/libSDL2.so)"
+            exec "${pkg}/bin/game"
+            '';
         });
 
       devShells = eachSystem ({ pkgs, haskellPkgs, system }: {

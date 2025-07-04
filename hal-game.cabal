@@ -45,7 +45,7 @@ extra-doc-files:    CHANGELOG.md
 
 common warnings
     default-extensions: ImportQualifiedPost
-                    , RecordWildCards
+                      , RecordWildCards
 
 
 
@@ -57,6 +57,14 @@ common libs
                     , OpenGL
                     , sdl2
                     , linear
+                    , gltf-codec
+                    , vector
+                    , unordered-containers
+                    , optics
+                    , optics-extra
+                    , generic-optics
+                    , aeson
+                    , aeson-optics
     default-language: GHC2021
 
 
@@ -85,3 +93,4 @@ library
     import:  warnings, libs
     hs-source-dirs: ./src
     exposed-modules: Shaders
+                   , Utils

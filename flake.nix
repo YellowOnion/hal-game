@@ -39,7 +39,7 @@
           default = pkg;
           wrapper = pkgs.writeShellScriptBin "wrapper.sh" ''
             export SDL_VIDEODRIVER=x11
-            export LD_LIBRARY_PATH="$(patchelf --print-rpath ${pkgs.sdl2-compat}/lib/libSDL2.so)"
+            export LD_LIBRARY_PATH="$(patchelf --print-rpath ${pkgs.sdl2-compat}/lib/libSDL2.so):$(patchelf --print-rpath ${pkgs.sdl3.lib}/lib/libSDL3.so)"
             exec "${pkg}/bin/game"
             '';
         });

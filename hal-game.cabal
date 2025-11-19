@@ -60,11 +60,14 @@ common libs
                     , gltf-codec
                     , vector
                     , unordered-containers
+                    , hashable
                     , optics
                     , optics-extra
                     , generic-optics
                     , aeson
                     , aeson-optics
+                    , apecs
+                    --    , kdt
     default-language: GHC2021
 
 
